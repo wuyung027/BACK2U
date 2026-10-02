@@ -102,6 +102,53 @@ def feature_text(item: ItemFeatures) -> str:
     return head + ", ".join(details)
 
 
+# ---------------------------------------------------------------- category
+# 임베딩 유사도만으로는 전혀 다른 물건도 높은 점수를 받는다
+# (운영 데이터 실측: 휴대폰↔무선 이어폰 100, 포스터↔격투기 글러브 53.5).
+# 운영 데이터와 회귀 사례에 나온 물품만 계열로 묶고, 양쪽 category가 모두 계열에 속하는데
+# 겹치는 계열이 없을 때만 후보에서 뺀다. 목록 밖이거나 비어 있는 category는 점수로만 판단한다.
+# 별칭은 공백을 뺀 이름에 포함되는지로 본다 ("접이식 우산" -> 우산).
+CATEGORY_GROUPS = {
+    "wallet": ("지갑", "카드케이스", "카드홀더"),
+    "earphones": ("이어폰", "에어팟", "airpods", "버즈", "이어버드"),
+    "headphones": ("헤드폰", "에어팟맥스"),
+    "phone": ("휴대폰", "핸드폰", "스마트폰", "휴대전화", "아이폰", "iphone"),
+    "umbrella": ("우산", "양산"),
+    "bottle": ("텀블러", "물병", "보틀", "보온병", "머그"),
+    "glove": ("장갑", "글러브"),
+    "poster": ("포스터", "전단지"),
+    "bag": ("가방", "백팩", "배낭", "에코백", "파우치", "필통"),
+    "keyring": ("키링", "열쇠", "키홀더"),
+    "glasses": ("안경", "선글라스"),
+    "mouse": ("마우스",),
+    "usb": ("usb",),
+    "snack": ("과자", "팝콘"),
+}
+
+
+def category_groups(name: str | None) -> set[str]:
+    compact = normalize(name).replace(" ", "")
+    if not compact:
+        return set()
+    return {group for group, aliases in CATEGORY_GROUPS.items() if any(alias in compact for alias in aliases)}
+
+
+def categories_compatible(lost: ItemFeatures, found: ItemFeatures) -> bool:
+    """
+    명백히 다른 물품 종류면 False. 한쪽 category라도 없거나 계열을 모르면 판단하지 않고 True.
+    category 점수처럼 keywords(습득자가 입력한 습득물명 포함)도 같은 물건의 다른 이름으로 본다.
+    """
+
+    lost_groups, found_groups = category_groups(lost.category), category_groups(found.category)
+    if not lost_groups or not found_groups:
+        return True
+    for keyword in lost.keywords:
+        lost_groups |= category_groups(keyword)
+    for keyword in found.keywords:
+        found_groups |= category_groups(keyword)
+    return bool(lost_groups & found_groups)
+
+
 # ---------------------------------------------------------------- location
 # 물건은 습득 전에 옮겨질 수 있으므로 장소는 "일치하면 가산"하는 증거로만 쓴다.
 # 다른 건물이면 0점 벌점 대신 None(비교 제외)으로 둔다.
@@ -291,3 +338,17 @@ def calculate_match_score(
             for key, value in reasons.items()
         },
     }
+
+
+# 운영 데이터(실제 임베딩) 실측에서 같은 계열 정상 쌍의 최저점은
+# 26.3(물병↔색이 다른 텀블러), 36.2(에어팟↔무선 이어폰)였다. 이 쌍들을 남기는 선으로 정한다.
+MIN_CANDIDATE_SCORE = 25.0
+
+
+def match_candidate(lost: ItemFeatures, found: ItemFeatures) -> dict | None:
+    """후보로 보여줄 쌍이면 calculate_match_score 결과, 아니면 None (category가 다르면 점수 계산 없이)."""
+
+    if not categories_compatible(lost, found):
+        return None
+    result = calculate_match_score(lost, found)
+    return result if result["match_score"] >= MIN_CANDIDATE_SCORE else None

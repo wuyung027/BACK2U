@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ArrowLeft, Check, CheckCircle2, FileText, ImageOff, Info, MapPin, RefreshCw, SearchX, ShieldCheck, Sparkles } from "lucide-react";
+import { ArrowLeft, Check, CheckCircle2, FileText, ImageOff, Info, MapPin, RefreshCw, Search, SearchX, ShieldCheck, Sparkles } from "lucide-react";
 import { AppHeader } from "@/components/app-header";
 import { MatchReasonBar, type MatchReason } from "@/components/match-reason-bar";
 import { useRegistrationStore } from "@/store/use-registration-store";
@@ -77,10 +77,14 @@ function OwnershipVerification({ lostId, foundId, required, question, questions,
   </section>;
 }
 
-function scoreMessage(score: number) {
-  if (score >= 70) return "서로 비슷한 단서가 많이 발견됐어요.";
-  if (score >= 40) return "일부 단서가 비슷해요. 직접 확인해보세요.";
-  return "비슷한 단서가 많지 않아요.";
+// 일치도는 AI 확신도가 아니라 단서별 점수를 합친 값이다. 너무 낮은 후보는 서버가 아예 내려주지 않는다.
+// 운영 데이터 실측: 같은 물건 쌍은 79점 이상, 같은 계열의 다른 물건은 47점 이하.
+const STRONG_MATCH_SCORE = 70;
+
+function scoreTier(score: number) {
+  return score >= STRONG_MATCH_SCORE
+    ? { strong: true, title: "가장 닮은 물건을 찾았어요", message: "여러 단서가 비슷해요." }
+    : { strong: false, title: "확인해볼 만한 후보가 있어요", message: "일부 단서가 비슷해요. 직접 확인해보세요." };
 }
 
 export default function MatchPage() {
@@ -108,7 +112,7 @@ export default function MatchPage() {
   const { source_item: source, matches } = state.data;
   const opposite = source.type === "FOUND" ? "분실물" : "습득물";
 
-  if (matches.length === 0) return shell(<div className="phone-panel mt-8 flex min-h-[320px] flex-col items-center justify-center rounded-[26px] px-5 text-center"><span className="flex size-14 items-center justify-center rounded-2xl bg-[#eaf4ff] text-[var(--blue)]"><SearchX size={27} /></span><p className="mt-4 text-sm font-bold">아직 일치하는 {opposite}이 없어요.</p><p className="mt-2 text-xs leading-5 text-[var(--muted)]">새로운 {opposite}이 등록되면 다시 확인할 수 있어요.</p><div className="mt-5 flex gap-2"><button type="button" onClick={() => void load()} className="flex min-h-11 items-center gap-2 rounded-xl border border-[#cddbeb] bg-white px-4 text-xs font-bold text-[var(--navy)]"><RefreshCw size={15} /> 다시 확인하기</button><Link href="/" className="flex min-h-11 items-center rounded-xl bg-[var(--navy)] px-4 text-xs font-bold text-white">홈으로</Link></div></div>);
+  if (matches.length === 0) return shell(<div className="phone-panel mt-8 flex min-h-[320px] flex-col items-center justify-center rounded-[26px] px-5 text-center"><span className="flex size-14 items-center justify-center rounded-2xl bg-[#eaf4ff] text-[var(--blue)]"><SearchX size={27} /></span><p className="mt-4 text-sm font-bold">아직 충분히 비슷한 물건을 찾지 못했어요.</p><p className="mt-2 break-keep text-xs leading-5 text-[var(--muted)]">현재 등록된 물건 중 일치하는 후보가 없습니다.<br />새로운 {opposite}이 등록되면 다시 확인해보세요.</p><div className="mt-5 flex gap-2"><button type="button" onClick={() => void load()} className="flex min-h-11 items-center gap-2 rounded-xl border border-[#cddbeb] bg-white px-4 text-xs font-bold text-[var(--navy)]"><RefreshCw size={15} /> 다시 확인하기</button><Link href="/" className="flex min-h-11 items-center rounded-xl bg-[var(--navy)] px-4 text-xs font-bold text-white">홈으로</Link></div></div>);
 
   const top = matches[0];
   const lost = source.type === "LOST" ? { id: source.id, features: source.features } : { id: top.item_id, features: top.features };
@@ -120,16 +124,17 @@ export default function MatchPage() {
     { key: "found", subtitle: source.type === "FOUND" ? "내가 주운 물건" : "등록된 습득물", features: found.features, image: foundImage, placeholder: "사진은 등록한 기기에서만 보여요" },
   ];
   const reasons: MatchReason[] = reasonLabels.map(({ key, label, detail }) => ({ label, detail, score: top.reasons[key] ?? null }));
+  const tier = scoreTier(top.match_score);
 
   return shell(<>
-    <div className="text-center"><span className="eyebrow"><Sparkles size={13} className="mr-1.5" /> AI MATCH RESULT</span><h1 className="mt-4 text-[29px] font-extrabold tracking-[-0.06em] sm:text-4xl">가장 닮은 물건을 찾았어요</h1><p className="mt-2 text-sm text-[var(--muted)]">{source.type === "FOUND" ? "주운 물건과 등록된 분실물의 단서를 비교했어요." : "내 분실물과 습득물의 단서를 비교했어요."}</p></div>
-    <div className="mt-7 flex items-center gap-4 rounded-[22px] bg-gradient-to-r from-[#dcf9ec] to-[#e6f8f5] px-5 py-5 sm:px-7"><span className="hidden size-14 shrink-0 items-center justify-center rounded-full bg-[#32bd91] text-white shadow-[0_8px_18px_rgba(37,170,123,.2)] min-[360px]:flex"><Check size={30} /></span><div className="min-w-0"><div className="whitespace-nowrap text-[29px] font-black leading-none tracking-[-0.06em] text-[#159a70] sm:text-4xl">{top.match_score}% MATCH</div><p className="mt-1.5 text-xs font-semibold text-[#4f8679]">{scoreMessage(top.match_score)}</p></div></div>
+    <div className="text-center"><span className="eyebrow"><Sparkles size={13} className="mr-1.5" /> SIMILAR ITEMS</span><h1 className="mt-4 text-[29px] font-extrabold tracking-[-0.06em] sm:text-4xl">{tier.title}</h1><p className="mt-2 text-sm text-[var(--muted)]">{source.type === "FOUND" ? "주운 물건과 등록된 분실물의 단서를 비교했어요." : "내 분실물과 습득물의 단서를 비교했어요."}</p></div>
+    <div className={`mt-7 flex items-center gap-4 rounded-[22px] bg-gradient-to-r px-5 py-5 sm:px-7 ${tier.strong ? "from-[#dcf9ec] to-[#e6f8f5]" : "from-[#fff4df] to-[#fff9ef]"}`}><span className={`hidden size-14 shrink-0 items-center justify-center rounded-full text-white min-[360px]:flex ${tier.strong ? "bg-[#32bd91] shadow-[0_8px_18px_rgba(37,170,123,.2)]" : "bg-[#f0a43a] shadow-[0_8px_18px_rgba(214,140,40,.2)]"}`}>{tier.strong ? <Check size={30} /> : <Search size={27} />}</span><div className="min-w-0"><div className={`whitespace-nowrap text-[29px] font-black leading-none tracking-[-0.06em] sm:text-4xl ${tier.strong ? "text-[#159a70]" : "text-[#a86200]"}`}>일치도 {Math.round(top.match_score)}%</div><p className={`mt-1.5 text-xs font-semibold ${tier.strong ? "text-[#4f8679]" : "text-[#8a6534]"}`}>{tier.message}</p></div></div>
     <div className="mt-7 grid grid-cols-2 gap-3 sm:gap-5">{cards.map((card) => <section className="subtle-card overflow-hidden" key={card.key}><div className="p-3 pb-0 sm:p-4 sm:pb-0"><span className="rounded-full bg-[#edf5ff] px-2.5 py-1 text-[10px] font-bold text-[var(--blue)]">{card.subtitle}</span></div><div className="relative m-3 mt-3 h-32 overflow-hidden rounded-xl bg-[#edf2f6] sm:m-4 sm:h-52">{card.image ? <Image src={card.image} alt={itemTitle(card.features)} fill unoptimized sizes="(max-width: 640px) 45vw, 320px" className="object-cover" /> : <div className="flex h-full flex-col items-center justify-center gap-2 px-2 text-center text-[#8ea2b7]">{card.key === "lost" ? <FileText size={30} strokeWidth={1.6} /> : <ImageOff size={30} strokeWidth={1.6} />}<span className="text-[10px] font-semibold sm:text-xs">{card.placeholder}</span></div>}</div><div className="px-3 pb-4 sm:px-4 sm:pb-5"><h2 className="break-keep text-sm font-extrabold sm:text-base">{itemTitle(card.features)}</h2><p className="mt-1 flex items-center gap-1 break-keep text-[10px] text-[var(--muted)] sm:text-xs"><MapPin size={12} className="shrink-0" /> {itemMeta(card.features)}</p></div></section>)}</div>
     <section className="subtle-card mt-6 p-5 sm:p-7"><div className="flex items-start justify-between gap-3"><div><h2 className="text-base font-extrabold sm:text-lg">AI 매칭 근거</h2><p className="mt-1 text-xs text-[var(--muted)]">각 단서가 얼마나 비슷한지 살펴보세요.</p></div><span className="rounded-full bg-[#eef6ff] px-2.5 py-1 text-[10px] font-bold text-[var(--blue)]">상세 보기</span></div><div className="mt-6 space-y-5">{reasons.map((reason) => <MatchReasonBar key={reason.label} reason={reason} />)}</div><div className="mt-6 flex gap-2 rounded-xl bg-[#f0f7ff] p-3 text-xs leading-5 text-[#4d718d]"><Info size={17} className="mt-0.5 shrink-0 text-[var(--blue)]" /><span>정보가 있는 단서만 종합한 결과이며, &apos;정보 없음&apos; 항목은 점수에 포함되지 않아요. 최종 소유권은 별도 확인이 필요해요.</span></div></section>
     {/* 소유 확인(정답 입력 → 보관 장소 공개)은 분실자 화면에서만. 습득자 화면에는 안내만 둔다. */}
     {source.type === "LOST" ? <OwnershipVerification key={`${lost.id}:${found.id}`} lostId={lost.id} foundId={found.id} required={Boolean(top.verification_required)} question={top.verification_question ?? null} questions={top.verification_questions ?? null} initiallyVerified={Boolean(top.verified)} />
       : <section className="subtle-card mt-5 p-5 sm:p-6"><h2 className="flex items-center gap-2 text-sm font-extrabold"><span className="flex size-8 items-center justify-center rounded-lg bg-[#eaf4ff] text-[var(--blue)]"><ShieldCheck size={17} /></span> 소유 확인</h2><p className="mt-3 break-keep rounded-xl bg-[#f6f9fc] p-4 text-sm leading-6 text-[#5b6b80]">분실자가 소유 확인을 완료하면 반환이 진행됩니다. 등록하신 보관 장소는 소유 확인을 마친 분실자에게만 안내돼요.</p></section>}
-    {matches.length > 1 && <section className="subtle-card mt-5 p-5 sm:p-6"><h2 className="text-sm font-extrabold">다른 후보 {matches.length - 1}개</h2><ul className="mt-3 divide-y divide-[#e9eef4]">{matches.slice(1).map((match) => <li key={match.item_id} className="flex items-center justify-between gap-3 py-3 text-xs"><span className="min-w-0 truncate font-bold">{itemTitle(match.features)} <span className="font-semibold text-[var(--muted)]">· {itemMeta(match.features)}</span></span><strong className="shrink-0 text-[var(--navy)]">{match.match_score}%</strong></li>)}</ul></section>}
+    {matches.length > 1 && <section className="subtle-card mt-5 p-5 sm:p-6"><h2 className="text-sm font-extrabold">다른 후보 {matches.length - 1}개</h2><ul className="mt-3 divide-y divide-[#e9eef4]">{matches.slice(1).map((match) => <li key={match.item_id} className="flex items-center justify-between gap-3 py-3 text-xs"><span className="min-w-0 truncate font-bold">{itemTitle(match.features)} <span className="font-semibold text-[var(--muted)]">· {itemMeta(match.features)}</span></span><strong className="shrink-0 text-[var(--navy)]">일치도 {Math.round(match.match_score)}%</strong></li>)}</ul></section>}
     <div className="mt-5 flex items-center gap-3 rounded-2xl border border-[#dce9f7] bg-white p-4 text-xs leading-5 text-[#5a7088]"><ShieldCheck size={20} className="shrink-0 text-[var(--blue)]" /> 개인정보 보호를 위해 습득자 연락처는 소유권 확인 후 안내됩니다.</div>
     <div className="mt-7 grid gap-3 sm:grid-cols-2"><Link href={source.type === "FOUND" ? "/found" : "/lost"} className="flex min-h-12 items-center justify-center gap-2 rounded-xl border border-[#cddbeb] bg-white text-sm font-bold text-[var(--navy)]"><ArrowLeft size={17} /> 다시 등록하기</Link><Link href="/" className="flex min-h-12 items-center justify-center rounded-xl bg-[var(--navy)] text-sm font-bold text-white">홈으로 돌아가기 →</Link></div>
     <p className="mt-5 text-center text-[11px] text-[#94a4b6]">등록 번호: {source.id.slice(0, 8)}</p>

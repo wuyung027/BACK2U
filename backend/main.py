@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from ai.feature_extractor import _mask_numbers, extract_found_features, extract_lost_features
-from ai.matcher import calculate_match_score
+from ai.matcher import match_candidate
 from ai.provider import (
     IMAGE_MIME_TYPES,
     MAX_IMAGE_BYTES,
@@ -329,7 +329,10 @@ def match_item(item_id: str):
 
     for candidate in candidates:
         lost, found = (source, candidate) if source["type"] == "LOST" else (candidate, source)
-        result = calculate_match_score(lost["features"], found["features"])
+        # 물품 종류가 명백히 다르거나 일치도가 너무 낮으면 후보에서 뺀다 (후보가 0개일 수 있다).
+        result = match_candidate(lost["features"], found["features"])
+        if result is None:
+            continue
         # 습득자가 만든 질문(질문 문장만)은 분실물 화면에서만 내려준다. 습득자 화면에서는 소유 확인을 하지 않는다.
         questions = public_questions(found.get("verification_challenges")) if source["type"] == "LOST" else []
 
