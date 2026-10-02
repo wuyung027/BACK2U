@@ -207,6 +207,8 @@ _PM_WORDS = ("오후", "저녁", "밤", "낮")
 _MERIDIEM = "|".join(_AM_WORDS + _PM_WORDS)
 _CLOCK = re.compile(rf"(?:({_MERIDIEM})\s*)?(\d{{1,2}})\s*시(?:\s*(\d{{1,2}})\s*분|\s*(반))?")
 _COLON = re.compile(rf"(?:({_MERIDIEM})\s*)?(\d{{1,2}}):(\d{{2}})")
+# 숫자 없이 쓰는 시각. "자정"은 "오전 12시"처럼 그날 00시로 본다.
+_NAMED_TIMES = {"자정": 0, "정오": 12 * 60}
 # 표현 오차("3시쯤" vs "2시 반")를 감안해 이 정도 역전은 같은 시각으로 본다.
 TIME_TOLERANCE_MINUTES = 60
 
@@ -218,8 +220,8 @@ def _hour_candidates(meridiem: str | None, hour: int) -> list[int]:
         return [0 if hour == 12 else hour]
     if meridiem == "낮":
         return [hour if hour >= 10 else hour + 12]
-    if meridiem == "밤" and hour < 5:
-        return [hour]
+    if meridiem == "밤" and (hour < 5 or hour == 12):
+        return [hour % 12]  # 밤 12시 = 00시, 밤 1~4시 = 새벽
     if meridiem in _PM_WORDS:
         return [hour if hour >= 12 else hour + 12]
     if hour == 0 or hour >= 12:
@@ -241,7 +243,8 @@ def parse_time(text: str | None) -> tuple[int | None, list[int]] | None:
     else:
         match = _CLOCK.search(text)
         if not match:
-            return None
+            named = next((minutes for word, minutes in _NAMED_TIMES.items() if word in text), None)
+            return None if named is None else (day, [named])
         meridiem, hour = match.group(1), int(match.group(2))
         minute = 30 if match.group(4) else int(match.group(3) or 0)
     if minute >= 60:

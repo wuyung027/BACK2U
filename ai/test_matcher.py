@@ -14,6 +14,7 @@ from ai.matcher import (
     categories_compatible,
     location_similarity,
     match_candidate,
+    parse_time,
     time_similarity,
 )
 from ai.schemas import ItemFeatures
@@ -73,6 +74,36 @@ class TimeSimilarityTest(unittest.TestCase):
 
     def test_next_day(self):
         self.assertEqual(time_similarity("어제 오후 5시", "오늘 오후 3시"), 30.0)
+
+
+class TwelveHourClockTest(unittest.TestCase):
+    """오전 12시 = 00시, 오후 12시 = 12시 (분 포함)."""
+
+    def test_noon_and_midnight(self):
+        expected = {
+            "오전 12시": 0, "오전 12시 30분": 30, "오전 11시": 11 * 60,
+            "오후 12시": 12 * 60, "오후 12시 30분": 12 * 60 + 30, "오후 1시": 13 * 60, "오후 11시": 23 * 60,
+            "오전 12시쯤": 0, "오후 12시경": 12 * 60, "오전 12:30": 30,
+            "밤 12시": 0, "밤 12시 30분": 30, "낮 12시": 12 * 60, "자정": 0, "정오": 12 * 60,
+        }
+        for text, minutes in expected.items():
+            with self.subTest(text):
+                self.assertEqual(parse_time(text), (None, [minutes]))
+
+    def test_date_is_kept(self):
+        self.assertEqual(parse_time("오늘 오전 12시"), (0, [0]))
+        self.assertEqual(parse_time("어제 오후 12시"), (-1, [12 * 60]))
+        self.assertEqual(parse_time("오늘 자정"), (0, [0]))
+        self.assertEqual(parse_time("10월 2일 오전 12시 30분"), (None, [30]))  # 월/일은 아직 해석하지 않는다
+
+    def test_matcher_time_order(self):
+        self.assertEqual(time_similarity("오후 12시", "오후 1시"), 100.0)  # 12:00 -> 13:00
+        self.assertEqual(time_similarity("오전 12시 30분", "오전 1시"), 100.0)  # 00:30 -> 01:00
+        self.assertEqual(time_similarity("오늘 오전 12시 30분", "오늘 오전 1시"), 100.0)
+        # 11:00 -> 00:00: 같은 날이면 역전이라 벌점, 날짜가 없으면 다음 날일 수 있어 판단 보류 (12:00으로 읽었다면 100)
+        self.assertEqual(time_similarity("오늘 오전 11시", "오늘 오전 12시"), 0.0)
+        self.assertIsNone(time_similarity("오전 11시", "오전 12시"))
+        self.assertEqual(time_similarity("오늘 오전 11시", "오늘 오전 10시"), 100.0)  # 허용 오차(60분) 안의 역전
 
 
 class MatchScoreLocationTimeTest(unittest.TestCase):
