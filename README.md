@@ -32,7 +32,7 @@ pnpm dev                                         # 터미널 2
 - Swagger: `http://localhost:8000/docs`, 상태 확인: `http://localhost:8000/health` (`ai_mode`, `persistence` 표시)
 - 프론트엔드는 `NEXT_PUBLIC_API_BASE_URL`(비우면 `http://localhost:8000`)로 백엔드를 호출합니다. 3000이 아닌 포트로 뜨면 백엔드 `CORS_ORIGINS`에 그 주소를 추가하세요.
 - AI 단독 테스트: `python -m ai.test_ai [이미지경로 ...]`. API 호출 없이 확인하려면 `AI_MOCK_MODE=true`.
-- 단위 테스트(AI·Supabase 호출 없음): `python -m unittest ai.test_matcher backend.test_verification backend.test_catalog_claims`
+- 단위 테스트(AI·Supabase 호출 없음): `python -m unittest ai.test_matcher backend.test_match backend.test_verification backend.test_catalog_claims backend.test_delete_item backend.test_found_item backend.test_items_list backend.test_store_supabase`
 
 ### 저장 방식 (`PERSISTENCE_MODE`)
 
@@ -41,7 +41,7 @@ pnpm dev                                         # 터미널 2
 
 Supabase를 쓰려면 프로젝트당 한 번만 아래를 수행합니다.
 
-1. Supabase Dashboard > SQL Editor에서 [`001_create_items.sql`](./supabase/migrations/001_create_items.sql), [`002_add_ownership_verification.sql`](./supabase/migrations/002_add_ownership_verification.sql)을 순서대로 실행합니다. (`items` 테이블, RLS, private bucket, 소유 확인 컬럼. 재실행해도 안전)
+1. Supabase Dashboard > SQL Editor에서 [`001_create_items.sql`](./supabase/migrations/001_create_items.sql), [`002_add_ownership_verification.sql`](./supabase/migrations/002_add_ownership_verification.sql), [`003_add_storage_location.sql`](./supabase/migrations/003_add_storage_location.sql), [`004_add_verification_challenges.sql`](./supabase/migrations/004_add_verification_challenges.sql)을 순서대로 실행합니다. (`items` 테이블, RLS, private bucket, 소유 확인·보관 장소 컬럼. 재실행해도 안전)
 2. Project Settings > API에서 Project URL과 service_role 키(또는 `sb_secret_...` secret 키)를 확인합니다.
 3. `.env`에 `PERSISTENCE_MODE=supabase`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`를 채우고 백엔드를 재시작합니다. `/health`의 `persistence`가 `supabase`이면 연결된 것입니다.
 
@@ -71,7 +71,7 @@ service_role/secret 키는 백엔드 전용입니다. `NEXT_PUBLIC_` 변수로 �
 
 `/lost`, `/found`, `/match/[id]`는 백엔드 API와 실제 AI로 동작합니다. 데모 흐름은 `/lost` 등록 → `/found` 등록 → `/match/{습득물 ID}`입니다. `/items` 목록과 상세는 백엔드에 등록된 데이터를 읽습니다. `/waiting`의 건국대학교 카페 레스티오 광고는 시연용 시안이며 실제 제휴나 할인 혜택을 뜻하지 않습니다. 광고 시청 후 표시되는 노출 부스트도 실제 푸시 알림을 보내지 않습니다. 클라이언트 등록 상태는 `src/store/use-registration-store.ts`에 모았습니다.
 
-소유 확인: 분실 등록 때 선택적으로 '소유 확인 질문'과 '비공개 정답'을 입력하면, `/match/[id]`에서 질문에 답해 소유를 확인할 수 있습니다. 정답은 서버에서 salt + SHA-256 해시로만 저장·판정되며 어떤 API 응답에도 포함되지 않고, 확인 상태는 해당 분실물·습득물 쌍에만 저장됩니다. 시도 횟수 제한과 연락처 연결·수령 안내는 아직 구현되지 않았습니다.
+소유 확인: 습득자가 습득 등록 때 보관 장소와 '소유 확인 질문' 3개·비공개 정답을 입력하고, 분실자는 `/match/[id]`에서 그중 하나에 답해 소유를 확인합니다. 정답은 서버에서 salt + SHA-256 해시로만 저장·판정되며 어떤 API 응답에도 포함되지 않습니다. 확인에 성공한 경우에만 보관 장소를 알려주고, 확인 상태는 해당 분실물·습득물 쌍에만 저장됩니다. 같은 쌍에서 오답이 5번 쌓이면 10분 동안 확인을 막습니다(서버 메모리 기준이라 재시작하면 초기화). 예전 데이터의 분실물 단일 질문도 계속 확인할 수 있습니다. 연락처 연결은 아직 구현되지 않았습니다.
 
 별도 시연 경로 `/items/found-wallet`에는 수동 클레임 퀴즈가 있습니다. 프론트는 `GET /api/v1/catalog-claims/found-wallet`로 문제와 선택지를 받고, `POST /api/v1/catalog-claims/found-wallet/verify`로 선택한 답을 보냅니다. 정답 판정과 보관 장소 응답은 백엔드에서 처리하며, 오답에는 장소를 내려주지 않습니다. 이 샘플 퀴즈는 로그인 사용자나 실제 등록 물건과 연결되지 않고 확인 상태도 DB에 저장하지 않으므로, 실제 수령 권한으로 사용하면 안 됩니다. 실제 등록 물건의 소유 확인은 `/api/v1/items/verify`를 사용합니다.
 

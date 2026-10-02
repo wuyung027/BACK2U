@@ -64,17 +64,15 @@ export type MatchCandidate = {
   verified?: boolean;
 };
 
-// storage_location은 소유 확인에 성공했을 때만 온다 (보관 장소가 없는 예전 습득물은 null).
 // 습득자가 FOUND 등록 때 만든 질문 3개 중 하나 (분실자에게는 질문 문장만 보여준다)
 export type VerificationQuestion = { id: string; question: string };
 
+// storage_location은 소유 확인에 성공했을 때만 온다 (보관 장소가 없는 예전 습득물은 null).
 export type VerifyResponse = { verified: boolean; message: string; storage_location?: string | null };
 export type CatalogClaimChallenge = { question: string; choices: string[] };
 export type CatalogClaimResponse = { verified: boolean; pickup_location: string | null };
 
 export type MatchResponse = { source_item_id: string; source_item: Item; matches: MatchCandidate[] };
-
-export type HealthResponse = { status: string; service: string; ai_mode: "REAL" | "MOCK" };
 
 type ApiErrorKind = "network" | "bad-request" | "not-found" | "rate-limit" | "ai" | "storage" | "server" | "unknown";
 
@@ -140,10 +138,6 @@ export function errorMessage(error: unknown, action?: "register") {
   if (!(error instanceof ApiError)) return "알 수 없는 오류가 발생했어요. 다시 시도해주세요.";
   if (action === "register" && error.kind === "storage") return "등록하지 못했어요. 입력 내용을 확인하고 다시 시도해주세요.";
   return error.message;
-}
-
-export function healthCheck() {
-  return request<HealthResponse>("/health");
 }
 
 // verification은 예전 분실자 단일 질문용(deprecated). 새 화면은 보내지 않는다.

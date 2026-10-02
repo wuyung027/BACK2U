@@ -148,7 +148,7 @@ class VerificationApiTest(unittest.TestCase):
     def test_storage_location_only_after_verification(self):
         lost = self._lost(verification_question="지갑 안쪽 스티커 문구는?", verification_answer=SECRET).json()["item"]
         found_b = self._found("학생회관 1층 안내데스크")
-        found_c = self._found("공학관 경비실")
+        self._found("공학관 경비실")
 
         # D: 매칭 응답(습득물/분실물 양쪽 화면)에는 보관 장소가 없다.
         for source in (found_b, lost["id"]):

@@ -279,7 +279,3 @@ def embed_texts(texts: list[str], config: AIConfig | None = None) -> list[list[f
             _EMBEDDING_CACHE[(model, text)] = vector
 
     return [_EMBEDDING_CACHE[(model, t)] for t in cleaned]
-
-
-def embed_text(text: str, config: AIConfig | None = None) -> list[float]:
-    return embed_texts([text], config)[0]
