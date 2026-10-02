@@ -18,6 +18,9 @@ from fastapi.testclient import TestClient  # noqa: E402
 from ai.schemas import ItemFeatures  # noqa: E402
 from backend import main  # noqa: E402
 from backend.verification import (  # noqa: E402
+    BLOCK_SECONDS,
+    MAX_FAILED_ATTEMPTS,
+    AttemptLimiter,
     hash_answer,
     normalize_answer,
     validate_verification,
@@ -299,6 +302,74 @@ class FoundChallengeTest(unittest.TestCase):
         r = self.client.post("/api/v1/items/found", files={"image": ("w.jpg", self.jpg, "image/jpeg")})
         found_id = r.json()["item"]["id"]
         self.assertEqual(self._verify(self._lost()["id"], found_id, "q1", "갈색").status_code, 400)
+
+
+@mock.patch.object(main, "extract_found_features", _fake_found)
+@mock.patch.object(main, "extract_lost_features", _fake_lost)
+class AttemptLimitTest(unittest.TestCase):
+    """(분실물, 습득물) 쌍마다 오답 5번이면 정답 확인을 멈춘다."""
+
+    setUp = FoundChallengeTest.setUp
+    _found = FoundChallengeTest._found
+    _lost = FoundChallengeTest._lost
+    _verify = FoundChallengeTest._verify
+
+    def _wrong(self, lost_id, found_id):
+        r = self._verify(lost_id, found_id, "q1", "빨간색")
+        self.assertEqual(r.status_code, 200)
+        self.assertFalse(r.json()["verified"])
+        self.assertNotIn(STORAGE, r.text)
+
+    def test_blocked_after_five_wrong_answers(self):
+        found_id = self._found().json()["item"]["id"]
+        lost_id = self._lost()["id"]
+        for _ in range(MAX_FAILED_ATTEMPTS):
+            self._wrong(lost_id, found_id)
+        # 6번째는 정답이어도 확인하지 않고, 보관 장소도 내주지 않는다.
+        blocked = self._verify(lost_id, found_id, "q2", "갈색")
+        self.assertEqual(blocked.status_code, 429)
+        self.assertEqual(blocked.json()["detail"], "소유 확인 시도가 너무 많아요. 잠시 후 다시 시도해주세요.")
+        self.assertNotIn(STORAGE, blocked.text)
+        self.assertFalse(main.store.get_item(lost_id)["verified_found_item_id"])
+
+    def test_other_pairs_are_not_blocked(self):
+        found_id = self._found().json()["item"]["id"]
+        other_found_id = self._found().json()["item"]["id"]
+        lost_id, other_lost_id = self._lost()["id"], self._lost()["id"]
+        for _ in range(MAX_FAILED_ATTEMPTS):
+            self._wrong(lost_id, found_id)
+        self.assertEqual(self._verify(lost_id, found_id, "q2", "갈색").status_code, 429)
+        self.assertEqual(self._verify(lost_id, other_found_id, "q2", "갈색").json()["storage_location"], STORAGE)
+        self.assertEqual(self._verify(other_lost_id, found_id, "q2", "갈색").json()["storage_location"], STORAGE)
+
+    def test_success_clears_failures(self):
+        found_id = self._found().json()["item"]["id"]
+        lost_id = self._lost()["id"]
+        for _ in range(MAX_FAILED_ATTEMPTS - 1):
+            self._wrong(lost_id, found_id)
+        self.assertEqual(self._verify(lost_id, found_id, "q3", "STANLEY").json()["storage_location"], STORAGE)
+        # 성공하면 오답 기록이 지워져 다시 4번 틀려도 막히지 않는다.
+        for _ in range(MAX_FAILED_ATTEMPTS - 1):
+            self._wrong(lost_id, found_id)
+        self.assertEqual(self._verify(lost_id, found_id, "q2", "갈색").json()["storage_location"], STORAGE)
+
+
+class AttemptLimiterTest(unittest.TestCase):
+    def test_block_expires(self):
+        now = [1000.0]
+        limiter = AttemptLimiter(clock=lambda: now[0])
+        pair = ("lost", "found")
+        for _ in range(MAX_FAILED_ATTEMPTS - 1):
+            limiter.record_failure(pair)
+        self.assertFalse(limiter.is_blocked(pair))
+        limiter.record_failure(pair)
+        self.assertTrue(limiter.is_blocked(pair))
+        now[0] += BLOCK_SECONDS - 1
+        self.assertTrue(limiter.is_blocked(pair))
+        now[0] += 1
+        self.assertFalse(limiter.is_blocked(pair))
+        limiter.record_failure(pair)  # 차단이 풀리면 처음부터 다시 센다
+        self.assertFalse(limiter.is_blocked(pair))
 
 
 if __name__ == "__main__":

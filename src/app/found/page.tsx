@@ -51,6 +51,8 @@ export default function FoundPage() {
   const setFoundPhotoName = useRegistrationStore((s) => s.setFoundPhotoName);
   const setFoundPreview = useRegistrationStore((s) => s.setFoundPreview);
   const busy = phase === "analyzing";
+  // phase는 다음 렌더링 전까지 반영되지 않아 연타가 그 사이에 들어올 수 있다. 요청 중인지는 ref로 바로 막는다.
+  const submitting = useRef(false);
   const missingMessage = !itemName.trim() ? "습득물명을 입력해주세요."
     : !location.trim() ? "물건을 처음 발견한 장소를 입력해주세요."
     : !timeText.trim() ? "물건을 발견한 시간을 입력해주세요."
@@ -97,7 +99,8 @@ export default function FoundPage() {
   };
 
   const submit = async () => {
-    if (!file || !detailsFilled || busy) return;
+    if (!file || !detailsFilled || submitting.current) return;
+    submitting.current = true;
     setPhase("analyzing");
     setError("");
     try {
@@ -110,8 +113,10 @@ export default function FoundPage() {
       }
       setPhase("done");
     } catch (err) {
-      setError(errorMessage(err));
+      setError(errorMessage(err, "register"));
       setPhase("ready");
+    } finally {
+      submitting.current = false;
     }
   };
 
@@ -143,7 +148,8 @@ export default function FoundPage() {
             </ol>
             <p className="mt-3 flex items-center gap-1.5 text-[13px] text-[var(--muted)]"><Lock size={13} className="shrink-0" aria-hidden="true" />정답은 다른 사용자에게 공개되지 않아요.</p>
           </section>
-          <ActionButton onClick={submit} disabled={!file || !detailsFilled || busy || phase === "done"} className="mt-5">{busy ? "사진을 분석하고 있어요..." : phase === "done" ? "등록 완료" : "AI로 분석하고 등록하기 ✨"}</ActionButton>
+          <ActionButton onClick={submit} disabled={!file || !detailsFilled || busy || phase === "done"} className="mt-5">{busy ? <><span className="size-4 animate-spin rounded-full border-2 border-white border-t-transparent" /> 사진과 물건 정보를 분석하고 있어요...</> : phase === "done" ? "등록 완료" : "AI로 분석하고 등록하기 ✨"}</ActionButton>
+          {busy && <p className="mt-3 text-center text-xs text-[var(--muted)]">처음 연결하는 경우 조금 더 걸릴 수 있어요.</p>}
           {file && !detailsFilled && phase !== "done" && <p className="mt-3 text-center text-xs text-[var(--muted)]">{missingMessage}</p>}
           {error && <p className="mt-3 text-xs font-semibold text-red-600" role="alert">{error}</p>}
           <div className="mt-5 flex items-start gap-3 rounded-2xl bg-[#f1f8ff] p-4"><Camera size={18} className="mt-0.5 shrink-0 text-[var(--blue)]" /><p className="text-xs leading-5 text-[#59728e]">학생증 번호나 연락처처럼 민감한 정보가 보이면 사진을 가린 뒤 올려주세요.</p></div>

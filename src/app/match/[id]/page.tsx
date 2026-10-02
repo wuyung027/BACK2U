@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -34,6 +34,8 @@ function itemMeta(features: ItemFeatures) {
 function OwnershipVerification({ lostId, foundId, required, question, questions, initiallyVerified }: { lostId: string; foundId: string; required: boolean; question: string | null; questions: VerificationQuestion[] | null; initiallyVerified: boolean }) {
   const [answer, setAnswer] = useState("");
   const [busy, setBusy] = useState(false);
+  // 연타·Enter가 다음 렌더링 전에 들어와도 확인 요청은 한 번만 보낸다.
+  const submitting = useRef(false);
   const [verified, setVerified] = useState(initiallyVerified);
   const [selected, setSelected] = useState(questions?.[0]?.id ?? "");
   // 보관 장소는 이 화면에서 정답을 맞혔을 때만 받는다 (매칭 조회 응답에는 없음 → 새로고침하면 다시 확인).
@@ -44,7 +46,8 @@ function OwnershipVerification({ lostId, foundId, required, question, questions,
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!answer.trim() || busy || (multi && !selected)) return;
+    if (!answer.trim() || submitting.current || (multi && !selected)) return;
+    submitting.current = true;
     setBusy(true);
     setMismatch(false);
     setError("");
@@ -54,6 +57,7 @@ function OwnershipVerification({ lostId, foundId, required, question, questions,
     } catch (err) {
       setError(errorMessage(err));
     } finally {
+      submitting.current = false;
       setBusy(false);
     }
   };
@@ -70,7 +74,7 @@ function OwnershipVerification({ lostId, foundId, required, question, questions,
           </fieldset>
           : <p className="mt-4 rounded-xl bg-[#f6f9fc] p-3 text-sm font-bold">Q. {question}</p>}
         <input value={answer} onChange={(event) => { setAnswer(event.target.value); setMismatch(false); }} disabled={busy} maxLength={100} autoComplete="off" spellCheck={false} aria-label="소유 확인 답변" placeholder="답을 입력하세요" className="mt-3 h-12 w-full rounded-xl border border-[#dce6f1] bg-[#fbfdff] px-4 text-base text-[var(--navy)] outline-none transition placeholder:text-[#a8b5c4] focus:border-[var(--blue)] focus:ring-4 focus:ring-[#007aff]/10 disabled:opacity-60" />
-        <ActionButton type="submit" disabled={!answer.trim() || busy || (multi && !selected)} className="mt-3">{busy ? "확인하고 있어요..." : "소유 확인하기"}</ActionButton>
+        <ActionButton type="submit" disabled={!answer.trim() || busy || (multi && !selected)} className="mt-3">{busy ? "확인 중..." : "소유 확인하기"}</ActionButton>
         {mismatch && <p role="alert" className="mt-3 break-keep text-sm font-semibold text-red-600">{multi ? "답이 일치하지 않아요. 다른 질문을 선택해 다시 확인해보세요." : "입력한 정보가 일치하지 않아요."}</p>}
         {error && <p role="alert" className="mt-3 text-sm font-semibold text-red-600">{error}</p>}
       </form>}

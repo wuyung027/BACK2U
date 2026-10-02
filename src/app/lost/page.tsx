@@ -29,6 +29,8 @@ export default function LostPage() {
   const [item, setItem] = useState<Item | null>(null);
   const setRegisteredLostItem = useRegistrationStore((s) => s.setLostItem);
   const [busy, setBusy] = useState(false);
+  // busy는 다음 렌더링 전까지 반영되지 않아 연타가 그 사이에 들어올 수 있다. 요청 중인지는 ref로 바로 막는다.
+  const submitting = useRef(false);
   const [error, setError] = useState("");
   // 소유 확인 질문은 습득자가 FOUND 등록 때 만든다. 분실자는 설명만 쓰고 바로 등록한다.
   const resultRef = useRef<HTMLElement>(null);
@@ -36,7 +38,8 @@ export default function LostPage() {
   const highlights = features ? [...new Set([...features.keywords, ...features.distinctive_features])] : [];
 
   const register = async () => {
-    if (!description.trim() || busy) return;
+    if (!description.trim() || submitting.current) return;
+    submitting.current = true;
     setBusy(true);
     setError("");
     try {
@@ -46,8 +49,9 @@ export default function LostPage() {
       // 한 줄 레이아웃(모바일)에서는 결과 카드가 아래에 있으므로 바로 보이게 스크롤한다.
       if (window.innerWidth < 1024) requestAnimationFrame(() => resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
     } catch (err) {
-      setError(errorMessage(err));
+      setError(errorMessage(err, "register"));
     } finally {
+      submitting.current = false;
       setBusy(false);
     }
   };
@@ -71,7 +75,8 @@ export default function LostPage() {
 
           {item ? <><p role="status" className="mt-7 flex items-center justify-center gap-2 rounded-2xl bg-[#e9f9f2] px-4 py-4 text-base font-bold text-[#1f8a63]"><CheckCircle2 size={20} /> 등록이 완료됐어요</p>
             <button type="button" onClick={restart} className="mx-auto mt-4 block text-sm font-bold text-[var(--blue)] underline underline-offset-4">다른 분실물 등록하기</button></>
-            : <ActionButton onClick={register} disabled={!description.trim() || busy} className={`mt-7 ${ctaClass}`}>{busy ? <><span className="size-4 animate-spin rounded-full border-2 border-white border-t-transparent" /> AI가 특징을 정리하고 있어요...</> : "AI로 분석하고 등록하기 ✨"}</ActionButton>}
+            : <><ActionButton onClick={register} disabled={!description.trim() || busy} className={`mt-7 ${ctaClass}`}>{busy ? <><span className="size-4 animate-spin rounded-full border-2 border-white border-t-transparent" /> AI가 분석하고 있어요...</> : "AI로 분석하고 등록하기 ✨"}</ActionButton>
+              {busy && <p className="mt-3 text-center text-sm text-[var(--muted)]">처음 연결하는 경우 조금 더 걸릴 수 있어요.</p>}</>}
           {error && <p className="mt-4 break-keep rounded-xl bg-[#fff2f2] px-4 py-3 text-sm font-semibold text-red-600" role="alert">{error}</p>}
         </section>
 

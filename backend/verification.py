@@ -9,6 +9,8 @@ import hashlib
 import hmac
 import re
 import secrets
+import threading
+import time
 import unicodedata
 
 QUESTION_MAX_LENGTH = 200
@@ -108,3 +110,42 @@ def public_questions(challenges) -> list[dict]:
 
 def find_challenge(challenges, question_id: str | None) -> dict | None:
     return next((c for c in (challenges or []) if isinstance(c, dict) and question_id and c.get("id") == question_id), None)
+
+
+# ------------------------------------------------- 오답 제한
+# (분실물, 습득물) 쌍마다 오답 5번이면 10분 동안 답을 확인하지 않는다.
+# 서버 메모리에만 두므로 서버가 재시작되면 초기화된다.
+
+MAX_FAILED_ATTEMPTS = 5
+BLOCK_SECONDS = 10 * 60
+
+
+class AttemptLimiter:
+    def __init__(self, max_failures: int = MAX_FAILED_ATTEMPTS, block_seconds: float = BLOCK_SECONDS, clock=time.monotonic):
+        self._max_failures = max_failures
+        self._block_seconds = block_seconds
+        self._clock = clock
+        self._failures: dict[tuple[str, str], int] = {}
+        self._blocked_until: dict[tuple[str, str], float] = {}
+        self._lock = threading.Lock()
+
+    def is_blocked(self, pair: tuple[str, str]) -> bool:
+        with self._lock:
+            until = self._blocked_until.get(pair)
+            if until is not None and self._clock() >= until:
+                del self._blocked_until[pair]
+                return False
+            return until is not None
+
+    def record_failure(self, pair: tuple[str, str]) -> None:
+        with self._lock:
+            failures = self._failures.pop(pair, 0) + 1
+            if failures >= self._max_failures:
+                self._blocked_until[pair] = self._clock() + self._block_seconds
+            else:
+                self._failures[pair] = failures
+
+    def reset(self, pair: tuple[str, str]) -> None:
+        with self._lock:
+            self._failures.pop(pair, None)
+            self._blocked_until.pop(pair, None)

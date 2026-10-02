@@ -76,7 +76,10 @@ export type MatchResponse = { source_item_id: string; source_item: Item; matches
 
 export type HealthResponse = { status: string; service: string; ai_mode: "REAL" | "MOCK" };
 
-type ApiErrorKind = "network" | "bad-request" | "not-found" | "ai" | "unknown";
+type ApiErrorKind = "network" | "bad-request" | "not-found" | "rate-limit" | "ai" | "storage" | "server" | "unknown";
+
+// 화면에는 아래 문구만 보여주고, 서버가 보낸 원문(예외·provider 응답 등)은 콘솔에만 남긴다.
+const SERVER_UNREACHABLE = "서버에 연결하지 못했어요. 잠시 후 다시 시도해주세요. 서버가 처음 시작되는 경우 잠시 걸릴 수 있어요.";
 
 export class ApiError extends Error {
   constructor(public kind: ApiErrorKind, message: string, public status?: number) {
@@ -91,17 +94,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     response = await fetch(`${API_BASE_URL}${path}`, { cache: "no-store", ...init });
   } catch (error) {
     console.error("[api] network error", path, error);
-    throw new ApiError("network", "서버에 연결할 수 없습니다. 잠시 후 다시 시도해주세요.");
+    throw new ApiError("network", SERVER_UNREACHABLE);
   }
 
   if (response.ok) return (await response.json()) as T;
 
-  let detail: unknown;
+  let body: { detail?: unknown; code?: unknown } | undefined;
   try {
-    detail = (await response.json())?.detail;
+    body = await response.json();
   } catch {
-    detail = undefined;
+    body = undefined;
   }
+  const detail = body?.detail;
   console.error("[api] request failed", path, response.status, detail);
 
   // 400/413 detail은 백엔드가 사용자용으로 작성한 문구이므로 그대로 보여준다.
@@ -114,14 +118,28 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (response.status === 404) {
     throw new ApiError("not-found", "등록된 물건을 찾을 수 없어요.", response.status);
   }
-  if (response.status >= 500) {
-    throw new ApiError("ai", "AI 분석 중 문제가 발생했습니다. 다시 시도해주세요.", response.status);
+  if (response.status === 429) {
+    throw new ApiError("rate-limit", "소유 확인 시도가 너무 많아요. 잠시 후 다시 시도해주세요.", response.status);
   }
-  throw new ApiError("unknown", "요청을 처리하지 못했습니다. 다시 시도해주세요.", response.status);
+  // 백엔드가 code로 AI 분석 실패와 저장소 실패를 알려준다 (둘 다 503일 수 있다).
+  if (body?.code === "ai_failed") {
+    throw new ApiError("ai", "물건 정보를 분석하지 못했어요. 잠시 후 다시 시도해주세요.", response.status);
+  }
+  if (body?.code === "storage_failed") {
+    throw new ApiError("storage", "저장소에 연결하지 못했어요. 잠시 후 다시 시도해주세요.", response.status);
+  }
+  // 그 밖의 5xx는 서버가 시작 중이거나 배포 중인 경우가 대부분이다.
+  if (response.status >= 500) {
+    throw new ApiError("server", SERVER_UNREACHABLE, response.status);
+  }
+  throw new ApiError("unknown", "요청을 처리하지 못했어요. 다시 시도해주세요.", response.status);
 }
 
-export function errorMessage(error: unknown) {
-  return error instanceof ApiError ? error.message : "알 수 없는 오류가 발생했습니다. 다시 시도해주세요.";
+// action="register": 등록 화면에서는 저장소 오류를 등록 실패로 안내한다.
+export function errorMessage(error: unknown, action?: "register") {
+  if (!(error instanceof ApiError)) return "알 수 없는 오류가 발생했어요. 다시 시도해주세요.";
+  if (action === "register" && error.kind === "storage") return "등록하지 못했어요. 입력 내용을 확인하고 다시 시도해주세요.";
+  return error.message;
 }
 
 export function healthCheck() {

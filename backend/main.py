@@ -44,6 +44,7 @@ from backend.schemas import (
     VerifyResponse,
 )
 from backend.verification import (
+    AttemptLimiter,
     build_challenges,
     find_challenge,
     hash_answer,
@@ -79,28 +80,29 @@ app.add_middleware(
 
 
 # AI 오류는 내부 메시지를 로그에만 남기고, 응답에는 일반화된 메시지만 준다.
+# code는 화면이 AI 분석 실패와 저장소 실패를 구분해 안내하는 데 쓴다 (둘 다 503일 수 있다).
 @app.exception_handler(AIConfigError)
 async def handle_ai_config_error(request: Request, exc: AIConfigError):
     logger.error("AI config error on %s: %s", request.url.path, exc)
-    return JSONResponse(status_code=503, content={"detail": "AI 서비스 설정이 올바르지 않습니다."})
+    return JSONResponse(status_code=503, content={"detail": "AI 서비스 설정이 올바르지 않습니다.", "code": "ai_failed"})
 
 
 @app.exception_handler(AIProviderError)
 async def handle_ai_provider_error(request: Request, exc: AIProviderError):
     logger.error("AI provider error on %s: %s", request.url.path, exc)
-    return JSONResponse(status_code=502, content={"detail": "AI 서비스 호출에 실패했습니다. 잠시 후 다시 시도해 주세요."})
+    return JSONResponse(status_code=502, content={"detail": "AI 서비스 호출에 실패했습니다. 잠시 후 다시 시도해 주세요.", "code": "ai_failed"})
 
 
 @app.exception_handler(AIResponseParseError)
 async def handle_ai_parse_error(request: Request, exc: AIResponseParseError):
     logger.error("AI response parse error on %s: %s", request.url.path, exc)
-    return JSONResponse(status_code=502, content={"detail": "AI 분석 결과를 해석하지 못했습니다. 다시 시도해 주세요."})
+    return JSONResponse(status_code=502, content={"detail": "AI 분석 결과를 해석하지 못했습니다. 다시 시도해 주세요.", "code": "ai_failed"})
 
 
 @app.exception_handler(store.PersistenceError)
 async def handle_persistence_error(request: Request, exc: store.PersistenceError):
     logger.error("Persistence error on %s: %s", request.url.path, exc)
-    return JSONResponse(status_code=503, content={"detail": "저장소에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요."})
+    return JSONResponse(status_code=503, content={"detail": "저장소에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.", "code": "storage_failed"})
 
 
 # 응답에 내보낼 item 필드 화이트리스트. 정답 해시/salt 등은 절대 포함하지 않는다.
@@ -360,6 +362,9 @@ def match_item(item_id: str):
     }
 
 
+verify_attempts = AttemptLimiter()
+
+
 # 실패 응답에는 storage_location 필드 자체를 넣지 않는다 (설정한 필드만 직렬화).
 @app.post("/api/v1/items/verify", response_model=VerifyResponse, response_model_exclude_unset=True, tags=["items"])
 def verify_ownership(body: VerifyRequest):
@@ -372,6 +377,10 @@ def verify_ownership(body: VerifyRequest):
         raise HTTPException(status_code=404, detail="해당 item을 찾을 수 없습니다.")
     if lost["type"] != "LOST" or found["type"] != "FOUND":
         raise HTTPException(status_code=400, detail="분실물과 습득물 조합으로만 확인할 수 있습니다.")
+    # 오답이 쌓인 쌍은 차단이 풀릴 때까지 정답 여부를 아예 확인하지 않는다.
+    pair = (lost["id"], found["id"])
+    if verify_attempts.is_blocked(pair):
+        raise HTTPException(status_code=429, detail="소유 확인 시도가 너무 많아요. 잠시 후 다시 시도해주세요.")
     challenges = found.get("verification_challenges")
     if challenges:
         # 습득자가 만든 질문 3개 중 분실자가 고른 질문 하나만 검사한다 (이 습득물의 질문만).
@@ -388,8 +397,10 @@ def verify_ownership(body: VerifyRequest):
         raise HTTPException(status_code=400, detail="등록된 소유 확인 질문이 없습니다.")
 
     if not matched:
+        verify_attempts.record_failure(pair)
         return {"verified": False, "message": "소유 확인 정보가 일치하지 않습니다."}
 
+    verify_attempts.reset(pair)
     store.set_verified(lost["id"], found["id"])
     # 이 요청의 습득물(found_item_id) 보관 장소만 돌려준다. 매칭/목록/상세 응답에는 없다.
     return {
