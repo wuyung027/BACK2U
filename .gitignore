@@ -1,0 +1,16 @@
+node_modules
+.next
+.next-dev
+out
+.env*
+!.env.example
+*.tsbuildinfo
+next-env.d.ts
+
+# Python
+__pycache__/
+*.pyc
+
+# 개인정보가 포함될 수 있는 테스트 이미지
+ai/test_images/
+test_images/

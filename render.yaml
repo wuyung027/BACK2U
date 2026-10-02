@@ -1,0 +1,49 @@
+services:
+  - type: web
+    name: back2u-api
+    runtime: python
+    plan: free
+    region: singapore
+    branch: main
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.5
+      - key: PERSISTENCE_MODE
+        value: supabase
+      - key: SUPABASE_STORAGE_BUCKET
+        value: found-items
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: AI_API_KEY
+        sync: false
+      - key: AI_BASE_URL
+        sync: false
+      - key: AI_MODEL
+        sync: false
+      - key: AI_EMBEDDING_MODEL
+        sync: false
+
+  - type: web
+    name: back2u-web
+    runtime: node
+    plan: free
+    region: singapore
+    branch: main
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm build
+    startCommand: ./node_modules/.bin/next start -H 0.0.0.0 -p $PORT
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: 22.22.0
+      - key: NEXT_PUBLIC_API_BASE_URL
+        value: /
+      - key: BACKEND_EXTERNAL_HOSTNAME
+        fromService:
+          name: back2u-api
+          type: web
+          envVarKey: RENDER_EXTERNAL_HOSTNAME
