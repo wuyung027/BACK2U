@@ -9,6 +9,7 @@ from dataclasses import replace
 from unittest import mock
 
 from ai.matcher import (
+    FAMILY_CATEGORY_FLOOR,
     calculate_match_score,
     categories_compatible,
     location_similarity,
@@ -182,11 +183,17 @@ class MatchCandidateTest(unittest.TestCase):
         self.assertIsNone(match_candidate(lost, found))
 
 
-# 운영 데이터에서 실제 임베딩으로 관찰한 점수: 색상 단어가 다른 물품명과도 높게 나온다.
+# 운영 데이터에서 실제 임베딩으로 관찰한 점수: 색상 단어가 다른 물품명과도 높게 나오고,
+# 같은 계열의 다른 이름은 낮게 나오기도 한다.
 _OBSERVED_SEMANTIC = {
     frozenset(("텀블러", "갈색")): 55.9,
     frozenset(("텀블러", "파란색")): 65.3,
     frozenset(("지갑", "갈색")): 54.9,
+    frozenset(("텀블러", "물병")): 12.7,
+    frozenset(("에어팟", "무선 이어폰")): 32.6,
+    frozenset(("키링", "열쇠고리")): 45.4,
+    frozenset(("지갑", "카드지갑")): 83.8,
+    frozenset(("우산", "접이식 우산")): 91.6,
 }
 _UNRELATED = 20.0
 
@@ -241,6 +248,54 @@ class CategoryEvidenceIsolationTest(unittest.TestCase):
         for name, (lost_variant, found_variant) in variants.items():
             with self.subTest(name):
                 self.assertAlmostEqual(self._category(lost_variant, found_variant), base, places=6)
+
+
+@mock.patch("ai.matcher.semantic_similarities", side_effect=_observed_semantic)
+class SameFamilyCategoryTest(unittest.TestCase):
+    """같은 계열의 다른 이름은 category 점수를 FAMILY_CATEGORY_FLOOR 아래로 내리지 않는다."""
+
+    def test_floor_only_raises_low_family_scores(self, _):
+        expected = {
+            ("텀블러", "물병"): FAMILY_CATEGORY_FLOOR,
+            ("에어팟", "무선 이어폰"): FAMILY_CATEGORY_FLOOR,
+            ("키링", "열쇠고리"): 45.4,
+            ("지갑", "카드지갑"): 83.8,
+            ("우산", "접이식 우산"): 91.6,
+            ("텀블러", "텀블러"): 100.0,
+        }
+        for (lost, found), category in expected.items():
+            with self.subTest(lost=lost, found=found):
+                result = match_candidate(ItemFeatures(category=lost), ItemFeatures(category=found))
+                self.assertIsNotNone(result)
+                self.assertEqual(result["reasons"]["category"], category)
+
+    def test_family_without_other_evidence_is_review_candidate(self, _):
+        result = match_candidate(ItemFeatures(category="텀블러"), ItemFeatures(category="물병"))
+        self.assertIsNotNone(result)
+        self.assertLess(result["match_score"], 70)  # 매칭 화면의 강한 후보(초록) 기준
+
+    def test_matching_evidence_raises_family_score(self, _):
+        def score(lost, found):
+            return calculate_match_score(lost, found)["match_score"]
+
+        base = score(ItemFeatures(category="텀블러"), ItemFeatures(category="물병"))
+        color = score(ItemFeatures(category="텀블러", color="파랑"), ItemFeatures(category="물병", color="파란색"))
+        place_time = score(
+            ItemFeatures(category="텀블러", location="공학관 1층", time_text="오후 3시"),
+            ItemFeatures(category="물병", location="공학관 1층", time_text="오후 4시"),
+        )
+        self.assertGreater(color, base)
+        self.assertGreater(place_time, base)
+
+    def test_unknown_family_keeps_embedding_score(self, _):
+        reasons = calculate_match_score(ItemFeatures(category="충전기"), ItemFeatures(category="보조배터리"))["reasons"]
+        self.assertEqual(reasons["category"], _UNRELATED)
+
+    def test_other_family_with_identical_context_stays_excluded(self, _):
+        context = {"color": "갈색", "location": "도서관 입구", "time_text": "오후 3시"}
+        for lost, found in [("텀블러", "안경"), ("글러브", "포스터"), ("지갑", "무선 이어폰"), ("휴대폰", "헤드폰"), ("팝콘", "백팩")]:
+            with self.subTest(lost=lost, found=found):
+                self.assertIsNone(match_candidate(ItemFeatures(category=lost, **context), ItemFeatures(category=found, **context)))
 
 
 if __name__ == "__main__":

@@ -126,6 +126,13 @@ CATEGORY_GROUPS = {
 }
 
 
+# 같은 계열의 다른 이름은 임베딩 점수가 낮게 나온다 (운영 실측 category: 텀블러↔물병 12.7,
+# 에어팟↔무선 이어폰 32.6). 같은 계열이면 category 점수를 이 값 아래로 내리지 않는다.
+# 100으로 올리면 다른 근거가 없을 때 최종 점수도 100이 된다. 색만 다른 쌍은 남기고(0.714×값 ≥ 25),
+# 색이 다르고 시간상 불가능한 쌍은 빼는(0.556×값 < 25) 35~45 사이에서 양쪽 여유가 비슷한 값.
+FAMILY_CATEGORY_FLOOR = 40.0
+
+
 def category_groups(name: str | None) -> set[str]:
     compact = normalize(name).replace(" ", "")
     if not compact:
@@ -311,6 +318,10 @@ def calculate_match_score(
     scores = semantic_similarities(semantic_pairs)
     for key, index in semantic_slots:
         reasons[key] = scores[index]
+
+    # 같은 계열 판단도 category끼리만 한다 (keywords는 category 점수에 쓰지 않는다).
+    if reasons["category"] is not None and category_groups(lost.category) & category_groups(found.category):
+        reasons["category"] = max(reasons["category"], FAMILY_CATEGORY_FLOOR)
 
     if lost.color and found.color:
         reasons["color"] = 100.0 if normalize_color(lost.color) == normalize_color(found.color) else 0.0
