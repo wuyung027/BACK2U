@@ -294,13 +294,12 @@ def calculate_match_score(
     semantic_pairs: list[tuple[str, str]] = []
     semantic_slots: list[tuple[str, int]] = []
 
-    # category: 분실 category vs 습득 category/keywords 중 최댓값.
-    # (Vision은 "무선 이어폰" + keywords "충전 케이스"처럼 물건명을 나눠 적는 경우가 많다.)
+    # category: 분실 category vs 습득 category만 비교한다.
+    # keywords에는 색상·구성품도 섞여 있어(예: "갈색") 다른 물건의 category 점수를 끌어올렸다.
+    # keywords·특징은 features 항목에서만 반영된다.
     if lost.category and found.category:
-        candidates = list(dict.fromkeys([found.category, *found.keywords]))
-        for candidate in candidates:
-            semantic_pairs.append((lost.category, candidate))
-            semantic_slots.append(("category", len(semantic_pairs) - 1))
+        semantic_pairs.append((lost.category, found.category))
+        semantic_slots.append(("category", len(semantic_pairs) - 1))
 
     # features: 양쪽 모두 keywords/특징/재질 중 하나라도 있을 때만.
     if (lost.keywords or lost.distinctive_features or lost.material) and (
@@ -311,8 +310,7 @@ def calculate_match_score(
 
     scores = semantic_similarities(semantic_pairs)
     for key, index in semantic_slots:
-        current = reasons[key]
-        reasons[key] = scores[index] if current is None else max(current, scores[index])
+        reasons[key] = scores[index]
 
     if lost.color and found.color:
         reasons["color"] = 100.0 if normalize_color(lost.color) == normalize_color(found.color) else 0.0
